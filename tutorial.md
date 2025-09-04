@@ -138,6 +138,11 @@ def resolve_under_cwd(cwd: Path, rel: str) -> Path:
 # -------------------------
 
 def read_file(ctx: RunContext[Deps], path: str) -> str:
+    """Read a UTF-8 text file under cwd and return its content.
+
+    Args:
+        path: The path to the file to read.
+    """
     try:
         p = resolve_under_cwd(ctx.deps.cwd, path)
         return p.read_text(encoding="utf-8")
@@ -146,6 +151,14 @@ def read_file(ctx: RunContext[Deps], path: str) -> str:
 
 
 def write_file(ctx: RunContext[Deps], path: str, content: str) -> dict:
+    """Create or overwrite a UTF-8 text file under cwd with the given content.
+    This tool requires user approval.
+    Returns a summary with bytes written.
+
+    Args:
+        path: The path to the file to write.
+        content: The content to write to the file.
+    """
     try:
         p = resolve_under_cwd(ctx.deps.cwd, path)
         p.parent.mkdir(parents=True, exist_ok=True)
@@ -157,6 +170,15 @@ def write_file(ctx: RunContext[Deps], path: str, content: str) -> dict:
 
 
 def edit_file(ctx: RunContext[Deps], path: str, old_string: str, new_string: str) -> dict:
+    """Edit a file by replacing the first exact occurrence of old_string with new_string.
+    The match must be exact including new lines and indentation.
+    Returns a summary with replacements count.
+
+    Args:
+        path: The path to the file to edit.
+        old_string: The string to replace. Must be exact including new lines and indentation.
+        new_string: The string to replace with.
+    """
     try:
         p = resolve_under_cwd(ctx.deps.cwd, path)
         data = p.read_text(encoding="utf-8")
@@ -171,7 +193,16 @@ def edit_file(ctx: RunContext[Deps], path: str, old_string: str, new_string: str
 
 
 def bash(ctx: RunContext[Deps], cmd: str, timeout: int = 60) -> dict:
-    """Simple bash runner without background support."""
+    """Run a bash command in cwd and return exit_code, stdout, stderr.
+    This tool requires user approval.
+    When running commands that might require interactivity (like npm init), make sure to pass proper arguments to the command to prevent it from hanging. For example, npm init --yes will run the command without any interactivity.
+
+    Use proper timeouts. If a command is expected to take a long time, use a longer timeout.
+
+    Args:
+        cmd: The bash command to run.
+        timeout: The timeout in seconds for the command to run. Defaults to 60 seconds.
+    """
     import subprocess
     try:
         proc = subprocess.run(
@@ -191,6 +222,12 @@ def bash(ctx: RunContext[Deps], cmd: str, timeout: int = 60) -> dict:
 
 
 def todo_list(todos: list[Todo]) -> list[Todo]:
+    """Set or update the current plan as a list of todos and return it back.
+    Status is one of: active, in progress, completed. Use this tool for complex tasks to plan out the steps, and update your progress as you go.
+
+    Args:
+        todos: The list of todos to set or update.
+    """
     return todos
 
 # -------------------------
@@ -278,6 +315,17 @@ class Deps:
 
 ```python
 def bash(ctx: RunContext[Deps], cmd: str, timeout: int = 60, background: bool = False) -> dict:
+    """Run a bash command in cwd and return exit_code, stdout, stderr.
+    This tool requires user approval.
+    When running commands that might require interactivity (like npm init), make sure to pass proper arguments to the command to prevent it from hanging. For example, npm init --yes will run the command without any interactivity.
+
+    Use proper timeouts. If a command is expected to take a long time, use a longer timeout.
+
+    Args:
+        cmd: The bash command to run.
+        timeout: The timeout in seconds for the command to run. Defaults to 60 seconds.
+        background: If True, run the command in the background and return immediately. The process will be killed when the script exits.
+    """
     try:
         if background:
             proc = subprocess.Popen(
