@@ -267,9 +267,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 if __name__ == "__main__":
     args = parse_args([] if False else __import__("sys").argv[1:])
     out = asyncio.run(agent_loop(task=args.task, cwd=Path.cwd()))
-    print("
+    print("""
 === Agent Output ===
-")
+""")
     print(out)
 ```
 
@@ -1137,16 +1137,14 @@ def resolve_under_cwd(cwd: Path, rel: str) -> Path:
 
 def format_content_preview(content: str, max_lines: int = 10) -> str:
     """Format content for nice display, truncating if too long."""
-    lines = content.split("
-")
+    lines = content.split("\n")
     if len(lines) <= max_lines:
         return content
 
     preview_lines = lines[: max_lines // 2]
     preview_lines.append(f"... ({len(lines) - max_lines} more lines) ...")
     preview_lines.extend(lines[-max_lines // 2 :])
-    return "
-".join(preview_lines)
+    return "\n".join(preview_lines)
 
 
 def read_file(ctx: RunContext[Deps], path: str) -> str:
@@ -1317,8 +1315,7 @@ class ApprovalToolset(WrapperToolset[Deps]):
 
     def _get_user_approval(self, name: str, tool_args: dict[str, Any]) -> bool:
         """Ask user for approval to execute a tool."""
-        print("
-⚠️  [yellow]Approval Required[/]")
+        print("\n⚠️  [yellow]Approval Required[/]")
         print(f"🔧 Tool: [bold]{name}[/]")
 
         # Format args nicely for different tool types
@@ -1327,9 +1324,9 @@ class ApprovalToolset(WrapperToolset[Deps]):
             content = tool_args.get("content", "")
             print(f"📁 Path: [cyan]{path}[/]")
             print(f"📝 Content ({len(content.split())} lines):")
-            print(f"[dim]```[/]
+            print(f"""[dim]```[/]
 {format_content_preview(content)}
-[dim]```[/]")
+[dim]```[/]""")
         elif name == "edit_file":
             path = tool_args.get("path", "")
             old_string = tool_args.get("old_string", "")
@@ -1337,15 +1334,15 @@ class ApprovalToolset(WrapperToolset[Deps]):
             print(f"📁 Path: [cyan]{path}[/]")
             print("🔍 Find:")
             print(
-                f"[dim]```[/]
+                f"""[dim]```[/]
 [red]{format_content_preview(old_string, 5)}[/red]
-[dim]```[/]"
+[dim]```[/]"""
             )
             print("🔄 Replace with:")
             print(
-                f"[dim]```[/]
+                f"""[dim]```[/]
 [green]{format_content_preview(new_string, 5)}[/green]
-[dim]```[/]"
+[dim]```[/]"""
             )
         else:
             print(f"📝 Args: {tool_args}")
@@ -1353,8 +1350,7 @@ class ApprovalToolset(WrapperToolset[Deps]):
         while True:
             response = (
                 input(
-                    "
-🤔 Approve execution? (Y)es/(n)o/(s)kip for this tool/(sa)skip all approvals"
+                    "\n🤔 Approve execution? (Y)es/(n)o/(s)kip for this tool/(sa)skip all approvals"
                 )
                 .lower()
                 .strip()
@@ -1378,8 +1374,7 @@ class ApprovalToolset(WrapperToolset[Deps]):
 
     def _get_new_instructions(self) -> str:
         """Get new instructions from user when they decline approval."""
-        print("
-📋 [yellow]Please provide new instructions:[/]")
+        print("\n📋 [yellow]Please provide new instructions:[/]")
         new_instructions = input("💭 Instructions: ").strip()
         return new_instructions
 
@@ -1510,9 +1505,9 @@ if __name__ == "__main__":
     args = parse_args(sys.argv[1:])
     print(Path.cwd())
     final = asyncio.run(agent_loop(task=args.task, cwd=Path.cwd()))
-    print("
+    print("""
 === Agent Output ===
-")
+""")
     print(final)
 ````
 
