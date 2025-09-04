@@ -1451,11 +1451,7 @@ coding_agent = Agent(
     deps_type=Deps,
     toolsets=[approval_toolset],
     instructions=CODING_AGENT_INSTRUCTIONS,
-    retries=30,
-    model_settings=AnthropicModelSettings(
-        anthropic_thinking={"type": "enabled", "budget_tokens": 32000},
-        extra_headers={"anthropic-beta": "interleaved-thinking-2025-05-14"},
-    ),
+    retries=30
 )
 
 QA_AGENT_INSTRUCTIONS = """You are an expert QA engineer specialized in critical bug detection using browser automation.
@@ -1487,11 +1483,7 @@ qa_agent = Agent(
     toolsets=[playwright_mcp_server],
     tools=[todo_list],
     instructions=QA_AGENT_INSTRUCTIONS,
-    retries=10,
-    model_settings=AnthropicModelSettings(
-        anthropic_thinking={"type": "enabled", "budget_tokens": 32000},
-        extra_headers={"anthropic-beta": "interleaved-thinking-2025-05-14"},
-    ),
+    retries=10
 )
 
 
