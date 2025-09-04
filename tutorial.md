@@ -1099,8 +1099,12 @@ from pydantic import BaseModel
 from pydantic_ai import (
     Agent,
     ModelRetry,
+    PromptedOutput,
     RunContext,
+    format_as_xml,
 )
+from pydantic_ai.mcp import MCPServerStdio
+from pydantic_ai.models.anthropic import AnthropicModelSettings
 from pydantic_ai.toolsets import FunctionToolset, ToolsetTool, WrapperToolset
 
 # Optional rich console for nicer output
@@ -1116,6 +1120,18 @@ dotenv.load_dotenv()
 class Todo(BaseModel):
     title: str
     status: Literal["active", "in progress", "completed"]
+
+
+class Bug(BaseModel):
+    description: str
+    reproduce_steps: str
+    severity: Literal["critical", "high", "medium", "low"]
+
+
+class QAResult(BaseModel):
+    result: Literal["success", "fail"]
+    breaking_bugs: list[Bug]
+    summary: str
 
 
 @dataclass
@@ -1324,9 +1340,7 @@ class ApprovalToolset(WrapperToolset[Deps]):
             content = tool_args.get("content", "")
             print(f"📁 Path: [cyan]{path}[/]")
             print(f"📝 Content ({len(content.split())} lines):")
-            print(f"""[dim]```[/]
-{format_content_preview(content)}
-[dim]```[/]""")
+            print(f"[dim]```[/]\n{format_content_preview(content)}\n[dim]```[/]")
         elif name == "edit_file":
             path = tool_args.get("path", "")
             old_string = tool_args.get("old_string", "")
@@ -1334,15 +1348,11 @@ class ApprovalToolset(WrapperToolset[Deps]):
             print(f"📁 Path: [cyan]{path}[/]")
             print("🔍 Find:")
             print(
-                f"""[dim]```[/]
-[red]{format_content_preview(old_string, 5)}[/red]
-[dim]```[/]"""
+                f"[dim]```[/]\n[red]{format_content_preview(old_string, 5)}[/red]\n[dim]```[/]"
             )
             print("🔄 Replace with:")
             print(
-                f"""[dim]```[/]
-[green]{format_content_preview(new_string, 5)}[/green]
-[dim]```[/]"""
+                f"[dim]```[/]\n[green]{format_content_preview(new_string, 5)}[/green]\n[dim]```[/]"
             )
         else:
             print(f"📝 Args: {tool_args}")
@@ -1350,7 +1360,7 @@ class ApprovalToolset(WrapperToolset[Deps]):
         while True:
             response = (
                 input(
-                    "\n🤔 Approve execution? (Y)es/(n)o/(s)kip for this tool/(sa)skip all approvals"
+                    "\n🤔 Approve execution? (Y)es/(n)o/(s)kip for this tool/(sa)skip all approvals:"
                 )
                 .lower()
                 .strip()
@@ -1400,9 +1410,9 @@ class ApprovalToolset(WrapperToolset[Deps]):
 # -------------------------
 # Agent definition
 # -------------------------
-CODING_AGENT_INSTRUCTIONS = """You are a senior full stack engineer who writes correct, minimal, and well structured code.
-You can design and implement end to end apps. Always produce a concrete plan first using the todo_list tool.
-Prefer iterative edits: read files before editing, summarize what will change, then edit.
+CODING_AGENT_INSTRUCTIONS = """You are a senior full stack engineer who writes correct, minimal, and well structured code. 
+You can design and implement end to end apps. Always produce a concrete plan first using the todo_list tool. 
+Prefer iterative edits: read files before editing, summarize what will change, then edit. 
 
 Your code repository is a fullstack app that suppose to work fully end to end.
 
@@ -1442,10 +1452,50 @@ coding_agent = Agent(
     toolsets=[approval_toolset],
     instructions=CODING_AGENT_INSTRUCTIONS,
     retries=30,
+    model_settings=AnthropicModelSettings(
+        anthropic_thinking={"type": "enabled", "budget_tokens": 32000},
+        extra_headers={"anthropic-beta": "interleaved-thinking-2025-05-14"},
+    ),
+)
+
+QA_AGENT_INSTRUCTIONS = """You are an expert QA engineer specialized in critical bug detection using browser automation.
+
+Your task is to test a web application endpoint and identify ONLY breaking/critical bugs that prevent core functionality.
+
+Focus on:
+- Critical functionality failures (login, navigation, forms, core features)
+- UI elements that are completely broken or inaccessible
+
+
+Do NOT report:
+- Minor styling issues
+- Small UI inconsistencies  
+- Performance issues unless they completely break the app
+- Accessibility issues unless they make the app unusable
+
+Start by creating a test plan using the todo_list tool and update it as you go."""
+
+# Create Playwright MCP server connection
+playwright_mcp_server = MCPServerStdio(
+    "npx",
+    args=["@playwright/mcp@latest"],
+)
+
+qa_agent = Agent(
+    MODEL,
+    output_type=PromptedOutput(QAResult),
+    toolsets=[playwright_mcp_server],
+    tools=[todo_list],
+    instructions=QA_AGENT_INSTRUCTIONS,
+    retries=10,
+    model_settings=AnthropicModelSettings(
+        anthropic_thinking={"type": "enabled", "budget_tokens": 32000},
+        extra_headers={"anthropic-beta": "interleaved-thinking-2025-05-14"},
+    ),
 )
 
 
-async def agent_loop(task: str, cwd: Path) -> str:
+async def agent_loop(task: str, cwd: Path) -> QAResult:
     logfire.configure(token=os.getenv("LOGFIRE_API_KEY"), scrubbing=False)
     logfire.instrument_pydantic_ai()
 
@@ -1479,17 +1529,34 @@ async def agent_loop(task: str, cwd: Path) -> str:
     # Register cleanup for this agent's processes
     atexit.register(cleanup_deps_processes)
 
-    try:
-        # First run - may produce approvals
-        with logfire.span(f"Coding Agent:{task}"):
-            result = await coding_agent.run(
-                task,
-                deps=deps,
-            )
-            return result.output
-    finally:
-        # Clean up background processes before exiting
-        cleanup_deps_processes()
+    max_attempts = 3
+    attempts = 0
+    while attempts < max_attempts:
+        try:
+            attempts += 1
+            # First run - may produce approvals
+            with logfire.span(f"Coding Agent:{task}"):
+                coding_result = await coding_agent.run(
+                    task,
+                    deps=deps,
+                )
+
+            with logfire.span(f"QA Agent:{task}"):
+                qa_input = {
+                    "task": task,
+                    "engineering_implementation_note": coding_result.output,
+                }
+                qa_result = await qa_agent.run(format_as_xml(qa_input))
+                qa_output = qa_result.output
+
+                if qa_output.result == "success":
+                    return qa_output
+
+        finally:
+            # Clean up background processes before exiting
+            cleanup_deps_processes()
+
+    return qa_output
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -1505,9 +1572,7 @@ if __name__ == "__main__":
     args = parse_args(sys.argv[1:])
     print(Path.cwd())
     final = asyncio.run(agent_loop(task=args.task, cwd=Path.cwd()))
-    print("""
-=== Agent Output ===
-""")
+    print("\n=== Agent Output ===\n")
     print(final)
 ````
 
