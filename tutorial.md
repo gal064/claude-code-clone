@@ -536,25 +536,6 @@ import logfire
 async def agent_loop(task: str, cwd: Path) -> str:
     logfire.configure(token=os.getenv("LOGFIRE_API_KEY"), scrubbing=False)
     logfire.instrument_pydantic_ai()
-
-    deps = Deps(task=task, cwd=cwd)
-
-    def cleanup():
-        for p in deps.background_processes:
-            try:
-                if p.poll() is None:
-                    p.terminate()
-                    try:
-                        p.wait(timeout=5)
-                    except subprocess.TimeoutExpired:
-                        p.kill(); p.wait()
-            except Exception:
-                pass
-
-    with logfire.span(f"Coding Agent:{task}"):
-        result = await agent.run(task, deps=deps)
-    cleanup()
-    return result.output
 ```
 
 ---
