@@ -19,8 +19,12 @@ from pydantic import BaseModel
 from pydantic_ai import (
     Agent,
     ModelRetry,
+    PromptedOutput,
     RunContext,
+    format_as_xml,
 )
+from pydantic_ai.mcp import MCPServerStdio
+from pydantic_ai.models.anthropic import AnthropicModelSettings
 from pydantic_ai.toolsets import FunctionToolset, ToolsetTool, WrapperToolset
 
 # Optional rich console for nicer output
@@ -36,6 +40,18 @@ dotenv.load_dotenv()
 class Todo(BaseModel):
     title: str
     status: Literal["active", "in progress", "completed"]
+
+
+class Bug(BaseModel):
+    description: str
+    reproduce_steps: str
+    severity: Literal["critical", "high", "medium", "low"]
+
+
+class QAResult(BaseModel):
+    result: Literal["success", "fail"]
+    breaking_bugs: list[Bug]
+    summary: str
 
 
 @dataclass
@@ -180,15 +196,14 @@ def bash(
         raise ModelRetry(f"Failed to execute command '{cmd}': {str(e)}")
 
 
-def todo_list(ctx: RunContext[Deps], todos: list[Todo]) -> list[Todo]:
+def todo_list(todos: list[Todo]) -> list[Todo]:
     """Set or update the current plan as a list of todos and return it back.
     Status is one of: active, in progress, completed. Use this tool for complex tasks to plan out the steps, and update your progress as you go.
 
     Args:
         todos: The list of todos to set or update.
     """
-    ctx.deps.todos = todos
-    return ctx.deps.todos
+    return todos
 
 
 def change_working_directory(ctx: RunContext[Deps], path: str) -> dict:
@@ -263,7 +278,7 @@ class ApprovalToolset(WrapperToolset[Deps]):
         while True:
             response = (
                 input(
-                    "\n🤔 Approve execution? (Y)es/(n)o/(s)kip for this tool/(sa)skip allapprovals for all tools: "
+                    "\n🤔 Approve execution? (Y)es/(n)o/(s)kip for this tool/(sa)skip all approvals:"
                 )
                 .lower()
                 .strip()
@@ -335,7 +350,9 @@ Use the tools provided to you to complete the task. Be diligent but keep code si
 4. Use `find` to locate files by name or extension.
 5. Use `grep` to search file contents if you know a function or keyword but not the file.
 6. When relevant, always build the project when you are done to make sure it works.
-7. When appropriate, start development servers in the background to test functionality. Use the background=True parameter in the bash tool to run servers without blocking.
+7. When done, start development servers in the background to test functionality. Use the background=True parameter in the bash tool to run servers without blocking. Explicitly define a random port for the server to avoid conflicts. For example `bash("PORT=3041 npm run dev", background=True)`
+
+In your final response, explain your user facing implementation you have done (no need to mention code or any technical details) and the endpoint (eg localhost:3000) to test the app.
 """
 
 # The agent can use any supported model provider via MODEL env var.
@@ -353,10 +370,50 @@ coding_agent = Agent(
     toolsets=[approval_toolset],
     instructions=CODING_AGENT_INSTRUCTIONS,
     retries=30,
+    model_settings=AnthropicModelSettings(
+        anthropic_thinking={"type": "enabled", "budget_tokens": 32000},
+        extra_headers={"anthropic-beta": "interleaved-thinking-2025-05-14"},
+    ),
+)
+
+QA_AGENT_INSTRUCTIONS = """You are an expert QA engineer specialized in critical bug detection using browser automation.
+
+Your task is to test a web application endpoint and identify ONLY breaking/critical bugs that prevent core functionality.
+
+Focus on:
+- Critical functionality failures (login, navigation, forms, core features)
+- UI elements that are completely broken or inaccessible
+
+
+Do NOT report:
+- Minor styling issues
+- Small UI inconsistencies  
+- Performance issues unless they completely break the app
+- Accessibility issues unless they make the app unusable
+
+Start by creating a test plan using the todo_list tool and update it as you go."""
+
+# Create Playwright MCP server connection
+playwright_mcp_server = MCPServerStdio(
+    "npx",
+    args=["@playwright/mcp@latest"],
+)
+
+qa_agent = Agent(
+    MODEL,
+    output_type=PromptedOutput(QAResult),
+    toolsets=[playwright_mcp_server],
+    tools=[todo_list],
+    instructions=QA_AGENT_INSTRUCTIONS,
+    retries=10,
+    model_settings=AnthropicModelSettings(
+        anthropic_thinking={"type": "enabled", "budget_tokens": 32000},
+        extra_headers={"anthropic-beta": "interleaved-thinking-2025-05-14"},
+    ),
 )
 
 
-async def agent_loop(task: str, cwd: Path) -> str:
+async def agent_loop(task: str, cwd: Path) -> QAResult:
     logfire.configure(token=os.getenv("LOGFIRE_API_KEY"), scrubbing=False)
     logfire.instrument_pydantic_ai()
 
@@ -379,17 +436,34 @@ async def agent_loop(task: str, cwd: Path) -> str:
     # Register cleanup for this agent's processes
     atexit.register(cleanup_deps_processes)
 
-    try:
-        # First run - may produce approvals
-        with logfire.span(f"Coding Agent:{task}"):
-            result = await coding_agent.run(
-                task,
-                deps=deps,
-            )
-            return result.output
-    finally:
-        # Clean up background processes before exiting
-        cleanup_deps_processes()
+    max_attempts = 3
+    attempts = 0
+    while attempts < max_attempts:
+        try:
+            attempts += 1
+            # First run - may produce approvals
+            with logfire.span(f"Coding Agent:{task}"):
+                coding_result = await coding_agent.run(
+                    task,
+                    deps=deps,
+                )
+
+            with logfire.span(f"QA Agent:{task}"):
+                qa_input = {
+                    "task": task,
+                    "engineering_implementation_note": coding_result.output,
+                }
+                qa_result = await qa_agent.run(format_as_xml(qa_input))
+                qa_output = qa_result.output
+
+                if qa_output.result == "success":
+                    return qa_output
+
+        finally:
+            # Clean up background processes before exiting
+            cleanup_deps_processes()
+
+    return qa_output
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
