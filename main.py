@@ -7,6 +7,7 @@ import json
 import os
 import re
 import shlex
+import signal
 import subprocess
 import sys
 from dataclasses import dataclass, field
@@ -158,14 +159,16 @@ def bash(
     """
     try:
         if background:
-            # Start process in background
+            # Start process in background without shell wrapper
             proc = subprocess.Popen(
-                cmd,
+                ["bash", "-c", cmd],
                 cwd=str(ctx.deps.cwd),
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
                 text=True,
-                shell=True,
+                shell=False,
+                start_new_session=True,  # Create new process group for safety
             )
             # Track the process for cleanup
             ctx.deps.background_processes.append(proc)
@@ -423,13 +426,24 @@ async def agent_loop(task: str, cwd: Path) -> QAResult:
         """Clean up processes tracked in deps."""
         for proc in deps.background_processes:
             try:
-                if proc.poll() is None:  # Process is still running
-                    proc.terminate()
+                if proc.poll() is not None:
+                    continue  # Process already exited
+                
+                # Kill the process group to catch any child processes
+                try:
+                    os.killpg(proc.pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    continue  # Process group already gone
+                
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    # Escalate to SIGKILL on the group
                     try:
-                        proc.wait(timeout=5)
-                    except subprocess.TimeoutExpired:
-                        proc.kill()
-                        proc.wait()
+                        os.killpg(proc.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass  # Process group already gone
+                    proc.wait(timeout=5)
             except Exception:
                 pass  # Process might already be dead
 

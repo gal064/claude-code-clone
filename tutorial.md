@@ -299,6 +299,8 @@ Now we wrap our tools so that risky ones require explicit approval, and enhance 
 
 ```python
 import atexit
+import os
+import signal
 import subprocess
 from typing import Any
 from pydantic_ai.toolsets import FunctionToolset, ToolsetTool, WrapperToolset
@@ -328,13 +330,16 @@ def bash(ctx: RunContext[Deps], cmd: str, timeout: int = 60, background: bool = 
     """
     try:
         if background:
+            # Start process in background without shell wrapper
             proc = subprocess.Popen(
-                cmd,
+                ["bash", "-c", cmd],
                 cwd=str(ctx.deps.cwd),
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
                 text=True,
-                shell=True,
+                shell=False,
+                start_new_session=True,  # Create new process group for safety
             )
             ctx.deps.background_processes.append(proc)
             return {"pid": proc.pid, "status": "running_in_background"}
@@ -480,12 +485,14 @@ Use the tools provided to you to complete the task. Be diligent but keep code si
 # Guidelines
 1. Unless explicitly instructed otherwise, use NPM,Nextjs and Tailwindcss, Prisma and SQLite.
 2. If working of an empty project, use NextJS CLI to initialize the project. Make sure to pass --yes both after npx and after the NextJS CLI command to skip the interactive. e.g. npx --yes create-next-app@latest myapp --yes
-3. Use Bash tools (ls, grep, find, etc.) to explore the codebase if necessary.
-4. Keep things simple and clean.
-5. Use `find` to locate files by name or extension.
-6. Use `grep` to search file contents if you know a function or keyword but not the file.
-7. When relevant, always build the project when you are done to make sure it works.
-8. When appropriate, start development servers in the background to test functionality. Use the background=True parameter in the bash tool to run servers without blocking.
+2. Use Bash tools (ls, grep, find, etc.) to explore the codebase if necessary.
+3. Keep things simple and clean.
+4. Use `find` to locate files by name or extension.
+5. Use `grep` to search file contents if you know a function or keyword but not the file.
+6. When relevant, always build the project when you are done to make sure it works.
+7. When done, start development servers in the background to test functionality. Use the background=True parameter in the bash tool to run servers without blocking. Explicitly define a random port for the server to avoid conflicts. For example `bash("PORT=3041 npm run dev", background=True)`
+
+In your final response, explain your user facing implementation you have done (no need to mention code or any technical details) and the endpoint (eg localhost:3000) to test the app.
 """
 
 # Wrap the 5 tools with approvals
@@ -507,14 +514,26 @@ async def agent_loop(task: str, cwd: Path) -> str:
     def cleanup():
         for p in deps.background_processes:
             try:
-                if p.poll() is None:
-                    p.terminate()
+                if p.poll() is not None:
+                    continue  # Process already exited
+                
+                # Kill the process group to catch any child processes
+                try:
+                    os.killpg(p.pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    continue  # Process group already gone
+                
+                try:
+                    p.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    # Escalate to SIGKILL on the group
                     try:
-                        p.wait(timeout=5)
-                    except subprocess.TimeoutExpired:
-                        p.kill(); p.wait()
+                        os.killpg(p.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass  # Process group already gone
+                    p.wait(timeout=5)
             except Exception:
-                pass
+                pass  # Process might already be dead
     atexit.register(cleanup)
 
     result = await agent.run(task, deps=deps)
@@ -554,6 +573,7 @@ import argparse
 import asyncio
 import atexit
 import os
+import signal
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -665,13 +685,16 @@ def bash(ctx: RunContext[Deps], cmd: str, timeout: int = 60, background: bool = 
     """
     try:
         if background:
+            # Start process in background without shell wrapper
             proc = subprocess.Popen(
-                cmd,
+                ["bash", "-c", cmd],
                 cwd=str(ctx.deps.cwd),
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
                 text=True,
-                shell=True,
+                shell=False,
+                start_new_session=True,  # Create new process group for safety
             )
             ctx.deps.background_processes.append(proc)
             return {"pid": proc.pid, "status": "running_in_background"}
@@ -825,12 +848,14 @@ Use the tools provided to you to complete the task. Be diligent but keep code si
 # Guidelines
 1. Unless explicitly instructed otherwise, use NPM,Nextjs and Tailwindcss, Prisma and SQLite.
 2. If working of an empty project, use NextJS CLI to initialize the project. Make sure to pass --yes both after npx and after the NextJS CLI command to skip the interactive. e.g. npx --yes create-next-app@latest myapp --yes
-3. Use Bash tools (ls, grep, find, etc.) to explore the codebase if necessary.
-4. Keep things simple and clean.
-5. Use `find` to locate files by name or extension.
-6. Use `grep` to search file contents if you know a function or keyword but not the file.
-7. When relevant, always build the project when you are done to make sure it works.
-8. When appropriate, start development servers in the background to test functionality. Use the background=True parameter in the bash tool to run servers without blocking.
+2. Use Bash tools (ls, grep, find, etc.) to explore the codebase if necessary.
+3. Keep things simple and clean.
+4. Use `find` to locate files by name or extension.
+5. Use `grep` to search file contents if you know a function or keyword but not the file.
+6. When relevant, always build the project when you are done to make sure it works.
+7. When done, start development servers in the background to test functionality. Use the background=True parameter in the bash tool to run servers without blocking. Explicitly define a random port for the server to avoid conflicts. For example `bash("PORT=3041 npm run dev", background=True)`
+
+In your final response, explain your user facing implementation you have done (no need to mention code or any technical details) and the endpoint (eg localhost:3000) to test the app.
 """
 
 MODEL = os.getenv("MODEL", "claude-sonnet-4-0")
@@ -857,14 +882,26 @@ async def agent_loop(task: str, cwd: Path) -> str:
     def cleanup():
         for p in deps.background_processes:
             try:
-                if p.poll() is None:
-                    p.terminate()
+                if p.poll() is not None:
+                    continue  # Process already exited
+                
+                # Kill the process group to catch any child processes
+                try:
+                    os.killpg(p.pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    continue  # Process group already gone
+                
+                try:
+                    p.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    # Escalate to SIGKILL on the group
                     try:
-                        p.wait(timeout=5)
-                    except subprocess.TimeoutExpired:
-                        p.kill(); p.wait()
+                        os.killpg(p.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass  # Process group already gone
+                    p.wait(timeout=5)
             except Exception:
-                pass
+                pass  # Process might already be dead
     atexit.register(cleanup)
 
     with logfire.span(f"Coding Agent:{task}"):
@@ -1049,6 +1086,7 @@ import json
 import os
 import re
 import shlex
+import signal
 import subprocess
 import sys
 from dataclasses import dataclass, field
@@ -1186,14 +1224,16 @@ def bash(
     """
     try:
         if background:
-            # Start process in background
+            # Start process in background without shell wrapper
             proc = subprocess.Popen(
-                cmd,
+                ["bash", "-c", cmd],
                 cwd=str(ctx.deps.cwd),
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
                 text=True,
-                shell=True,
+                shell=False,
+                start_new_session=True,  # Create new process group for safety
             )
             # Track the process for cleanup
             ctx.deps.background_processes.append(proc)
@@ -1420,13 +1460,24 @@ async def agent_loop(task: str, cwd: Path) -> str:
         """Clean up processes tracked in deps."""
         for proc in deps.background_processes:
             try:
-                if proc.poll() is None:  # Process is still running
-                    proc.terminate()
+                if proc.poll() is not None:
+                    continue  # Process already exited
+                
+                # Kill the process group to catch any child processes
+                try:
+                    os.killpg(proc.pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    continue  # Process group already gone
+                
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    # Escalate to SIGKILL on the group
                     try:
-                        proc.wait(timeout=5)
-                    except subprocess.TimeoutExpired:
-                        proc.kill()
-                        proc.wait()
+                        os.killpg(proc.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass  # Process group already gone
+                    proc.wait(timeout=5)
             except Exception:
                 pass  # Process might already be dead
 
