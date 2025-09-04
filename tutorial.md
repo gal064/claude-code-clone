@@ -60,8 +60,8 @@ We recommend Codespaces because the agent frequently calls bash commands, and Co
 
 ### Option B - Local
 
-* Python 3.11+ installed
-* Git installed
+- Python 3.11+ installed
+- Git installed
 
 ### Initialize the project with uv
 
@@ -285,9 +285,9 @@ uv run ../main.py --task "Create a todo app. Should be a list of todos, with a t
 
 Notes
 
-* No user confirmation yet
-* `bash` has no background parameter
-* No Logfire instrumentation
+- No user confirmation yet
+- `bash` has no background parameter
+- No Logfire instrumentation
 
 ---
 
@@ -357,7 +357,7 @@ def bash(ctx: RunContext[Deps], cmd: str, timeout: int = 60, background: bool = 
 
 ### 3.3 Add `ApprovalToolset` wrapper
 
-```python
+````python
 def format_content_preview(content: str, max_lines: int = 10) -> str:
     """Format content for nice display, truncating if too long."""
     lines = content.split("\n")
@@ -371,7 +371,7 @@ def format_content_preview(content: str, max_lines: int = 10) -> str:
 
 class ApprovalToolset(WrapperToolset[Deps]):
     """A toolset wrapper that asks for approval for certain tools."""
-    
+
     def __init__(self, wrapped: FunctionToolset[Deps]):
         super().__init__(wrapped)
         self.require_approval = {"bash", "write_file", "edit_file"}
@@ -457,15 +457,15 @@ class ApprovalToolset(WrapperToolset[Deps]):
 
         result = await super().call_tool(name, tool_args, ctx, tool)
         return result
-```
+````
 
 ### 3.4 Enhanced instructions and wrap the tools
 
 ```python
 # Enhanced instructions with background execution guidance
-CODING_AGENT_INSTRUCTIONS = """You are a senior full stack engineer who writes correct, minimal, and well structured code. 
-You can design and implement end to end apps. Always produce a concrete plan first using the todo_list tool. 
-Prefer iterative edits: read files before editing, summarize what will change, then edit. 
+CODING_AGENT_INSTRUCTIONS = """You are a senior full stack engineer who writes correct, minimal, and well structured code.
+You can design and implement end to end apps. Always produce a concrete plan first using the todo_list tool.
+Prefer iterative edits: read files before editing, summarize what will change, then edit.
 
 Your code repository is a fullstack app that suppose to work fully end to end.
 
@@ -522,14 +522,6 @@ async def agent_loop(task: str, cwd: Path) -> str:
     return result.output
 ```
 
-**Try it**
-
-```bash
-# Start a simple server in the background as a test
-rm -rf temp && mkdir temp && cd temp
-uv run ../main.py --task "Run 'python -m http.server 8000' in background using the bash tool"
-```
-
 ---
 
 ## 4) Instrumentation with Logfire
@@ -574,7 +566,7 @@ At this point, you should have a complete `main.py` file with all features imple
 <details>
 <summary>Click to expand complete main.py code</summary>
 
-```python
+````python
 from __future__ import annotations
 
 import argparse
@@ -835,9 +827,9 @@ class ApprovalToolset(WrapperToolset[Deps]):
 # -------------------------
 # Agent
 # -------------------------
-CODING_AGENT_INSTRUCTIONS = """You are a senior full stack engineer who writes correct, minimal, and well structured code. 
-You can design and implement end to end apps. Always produce a concrete plan first using the todo_list tool. 
-Prefer iterative edits: read files before editing, summarize what will change, then edit. 
+CODING_AGENT_INSTRUCTIONS = """You are a senior full stack engineer who writes correct, minimal, and well structured code.
+You can design and implement end to end apps. Always produce a concrete plan first using the todo_list tool.
+Prefer iterative edits: read files before editing, summarize what will change, then edit.
 
 Your code repository is a fullstack app that suppose to work fully end to end.
 
@@ -913,12 +905,13 @@ if __name__ == "__main__":
     out = asyncio.run(agent_loop(task=args.task, cwd=Path.cwd()))
     print("=== Agent Output ===")
     print(out)
-```
+````
 
 </details>
 
 **Features implemented so far:**
-- ✅ Basic 5 tools: `read_file`, `write_file`, `edit_file`, `bash`, `todo_list`  
+
+- ✅ Basic 5 tools: `read_file`, `write_file`, `edit_file`, `bash`, `todo_list`
 - ✅ User confirmation system for risky operations
 - ✅ Background process execution and cleanup
 - ✅ Logfire instrumentation and tracing
@@ -984,7 +977,7 @@ Focus on:
 
 Do NOT report:
 - Minor styling issues
-- Small UI inconsistencies  
+- Small UI inconsistencies
 - Performance issues unless they completely break the app
 - Accessibility issues unless they make the app unusable
 
@@ -1011,7 +1004,7 @@ qa_agent = Agent(
 ```python
 async def agent_loop(task: str, cwd: Path) -> QAResult:
     # ... (setup code remains the same)
-    
+
     max_attempts = 3
     attempts = 0
     while attempts < max_attempts:
@@ -1042,7 +1035,6 @@ async def agent_loop(task: str, cwd: Path) -> QAResult:
     return qa_output
 ```
 
-
 **Try it**
 
 ```bash
@@ -1054,6 +1046,7 @@ uv run ../main.py --task "Create a todo app. Should be a list of todos, with a t
 ```
 
 The agent will now:
+
 1. Create the application using the coding agent
 2. Automatically test it using the QA agent with browser automation
 3. Report any critical bugs found
@@ -1391,9 +1384,9 @@ class ApprovalToolset(WrapperToolset[Deps]):
 # -------------------------
 # Agent definition
 # -------------------------
-CODING_AGENT_INSTRUCTIONS = """You are a senior full stack engineer who writes correct, minimal, and well structured code. 
-You can design and implement end to end apps. Always produce a concrete plan first using the todo_list tool. 
-Prefer iterative edits: read files before editing, summarize what will change, then edit. 
+CODING_AGENT_INSTRUCTIONS = """You are a senior full stack engineer who writes correct, minimal, and well structured code.
+You can design and implement end to end apps. Always produce a concrete plan first using the todo_list tool.
+Prefer iterative edits: read files before editing, summarize what will change, then edit.
 
 Your code repository is a fullstack app that suppose to work fully end to end.
 
@@ -1533,6 +1526,7 @@ qa_agent = Agent(
 ```
 
 **What this does:**
+
 - **`anthropic_thinking`**: Enables the model to use internal reasoning before responding, with a budget of 32,000 tokens for thinking
 - **`extra_headers`**: Enables the beta interleaved thinking feature from Anthropic
 - **Result**: Both agents will spend more time reasoning about complex problems before taking action
